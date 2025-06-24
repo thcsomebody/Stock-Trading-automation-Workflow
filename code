@@ -1,0 +1,95 @@
+HTTP Request Node: Add an HTTP Request Node to fetch historical price data for SPY from Alpha Vantage.
+
+
+Configuration:
+
+Method: GET
+URL: https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=SPY&apikey=YOUR_API_KEY
+Replace YOUR_API_KEY with your actual Alpha Vantage API key.
+Code Node: Add a Code Node to calculate the SMA and determine the trading signal.
+
+
+Configuration: Use the following JavaScript code:
+
+// Get the historical price data from the previous node
+const historicalData = $input.all()[0].json['Time Series (Daily)'];
+
+// Extract the closing prices
+const closingPrices = Object.entries(historicalData).map(([date, values]) => ({
+  date,
+  price: parseFloat(values['4. close'])
+})).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+// Calculate the 10-day and 30-day SMA
+const calculateSMA = (data, period) => {
+  return data.map((row, idx, arr) => {
+    if (idx < period - 1) return null;
+    const subset = arr.slice(idx - period + 1, idx + 1);
+    const sum = subset.reduce((acc, curr) => acc + curr.price, 0);
+    return sum / period;
+  });
+};
+
+const sma10 = calculateSMA(closingPrices, 10);
+const sma30 = calculateSMA(closingPrices, 30);
+
+// Determine the trading signal
+const latestSma10 = sma10[sma10.length - 1];
+const latestSma30 = sma30[sma30.length - 1];
+
+let signal;
+if (latestSma10 > latestSma30) {
+  signal = "BUY";
+} else if (latestSma10 < latestSma30) {
+  signal = "SELL";
+} else {
+  signal = "HOLD";
+}
+
+// Return the signal for the next node
+return [{
+  json: {
+    signal,
+    latestSma10,
+    latestSma30
+  }
+}];
+
+HTTP Request Node for Paper Trading
+Configuration:
+Method: POST
+URL: https://paper-api.alpaca.markets/v2/orders
+Headers:
+APCA-API-KEY-ID: YOUR_ALPACA_API_KEY
+APCA-API-SECRET-KEY: YOUR_ALPACA_API_SECRET
+{
+  "symbol": "SPY",
+  "qty": 1,
+  "side": "{{ $node['IF'].json['signal'] }}",
+  "type": "market",
+  "time_in_force": "gtc"
+}
+
+Node for Notifications
+Configuration:
+Chat ID: YOUR_TWITTER_CHAT_ID
+Message:
+Trading Signal: {{ $node['Code'].json['signal'] }}
+Action: {{ $node['IF'].json['action'] }}
+
+Google Sheets Node for Logging
+Configuration:
+Spreadsheet ID: YOUR_GOOGLE_SHEET_ID
+Range: Sheet1!A:D
+Options: Append
+Values:
+[
+  [
+    "{{ $node['Cron'].json['date'] }}",
+    "SPY",
+    "{{ $node['IF'].json['action'] }}",
+    "{{ $node['HTTP Request'].json['price'] }}"
+  ]
+]
+
+
